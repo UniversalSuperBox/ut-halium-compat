@@ -1,0 +1,120 @@
+#!/bin/bash
+# Ubuntu Touch preinit - Mounts important things before running Upstart
+
+echo "Hello world"
+
+set -x
+
+
+# This script came from the ubports-boot initrd, so rootmnt has a different
+# meaning here. For us, rootmnt is just /.
+echo "Attempting to create an fstab"
+
+# Mount some tmpfs
+mkdir -p /android
+mount -o rw,size=4096 -t tmpfs none /android
+mount -o rw,nosuid,noexec,relatime,mode=755 -t tmpfs tmpfs /run
+echo "Mounted tmpfs" 
+
+# Create some needed paths on tmpfs
+mkdir -p /android/data /android/system
+
+# Halium puts the userdata partition on /data, but we need it at /android/data
+mount --bind /data /android/data
+
+# Prepare the fstab
+FSTAB="/etc/fstab"
+touch /run/image.fstab
+echo "image.fstab" 
+mount -o bind /run/image.fstab $FSTAB || echo "failed to bind-mount to /run/image.fstab" 
+echo "bind-mounted" 
+echo "/dev/root / rootfs defaults,ro 0 0" >> $FSTAB
+echo "fstab prepared" 
+
+# Process the list of bind-mounts
+# (but don't mount them, mountall will do it)
+cat /etc/system-image/writable-paths | while read line; do
+    echo "" 
+    echo $line 
+    set -- $line
+    # Skip invalid/commented entries
+    ([ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]) && continue
+    [ "$1" = "#" ] && continue
+
+    # Skip invalid mount points
+    dstpath="/$1"
+    [ ! -e "$dstpath" ] && continue
+    echo "not skipping" 
+
+    if [ "$3" = "temporary" ]; then
+        # Temporary entries are simple, just mount a tmpfs
+        echo "tmpfs $1 tmpfs $5 0 0" >> $FSTAB
+        echo "Was a tmpfs"
+    elif [ "$3" = "persistent" ] || [ "$3" = "synced" ]; then
+        echo "finding source path" 
+        # Figure out the source path
+        if [ "$2" = "auto" ]; then
+            srcpath="/data/system-data/$1"
+            path="/data/system-data/$1"
+        else
+            srcpath="/data/$2"
+            path="/data/$2"
+        fi
+        echo "srcpath: $srcpath" 
+        echo "path: $path" 
+
+        if [ ! -e "$srcpath" ]; then
+            # Process new persistent or synced paths
+            dstown=$(stat -c "%u:%g" $dstpath)
+            dstmode=$(stat -c "%a" $dstpath)
+            echo "dstown: $dstown | dstmode: $dstmode" 
+            mkdir -p ${srcpath%/*}
+            echo "Made srcpath" 
+            if [ ! -d "$dstpath" ]; then
+                # Deal with redirected files
+                if [ "$4" = "transition" ]; then
+                    echo "Copying file $dstpath to $srcpath" 
+                    cp -a $dstpath $srcpath
+                else
+                    echo "Making file" 
+                    touch $srcpath
+                    chown $dstown $srcpath
+                    chmod $dstmode $srcpath
+                fi
+            else
+                # Deal with redirected directories
+                if [ "$4" = "transition" ] || [ "$3" = "synced" ]; then
+                    echo "Copying path $dstpath to $srcpath" 
+                    cp -aR $dstpath $srcpath
+                else
+                    echo "Making path $srcpath" 
+                    mkdir -p $srcpath
+                    chown $dstown $srcpath
+                    chmod $dstmode $srcpath
+                fi
+            fi
+            echo "made destpath" 
+        elif [ "$3" = "synced" ]; then
+            # Process existing synced paths
+            sync_dirs $dstpath . $srcpath
+        fi
+
+        # Write the fstab entry
+        if [ "$5" = "none" ]; then
+            echo "$path $1 none bind 0 0" >> $FSTAB
+        else
+            echo "$path $1 none bind,$5 0 0" >> $FSTAB
+        fi
+    else
+        continue
+    fi
+done
+
+cat $FSTAB
+
+# Mount the rootfs
+mount /data/system.img /android/system
+mount --bind /android/system /var/lib/lxc/android/rootfs
+
+echo "Done, starting init."
+exec /sbin/init
