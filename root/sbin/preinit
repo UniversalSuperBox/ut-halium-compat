@@ -5,10 +5,36 @@ echo "Hello world"
 
 set -x
 
+sync_dirs() {
+	base=$1
+	source=$2
+	target=$3
 
-# This script came from the ubports-boot initrd, so rootmnt has a different
-# meaning here. For us, rootmnt is just /.
-echo "Attempting to create an fstab"
+	OLD_PWD=$PWD
+	cd $base
+
+	for file in $source/*
+	do
+		# Skip empty directories
+		[ ! -e "$base/$file" ] && continue
+
+		# If the target already exists as a file or link, there's nothing we can do
+		[ -e "$target/$file" -o -L "$target/$file" ] && [ ! -d "$target/$file" ] && continue
+
+		# If the target doesn't exist, just copy it over
+		if [ ! -e "$target/$file" -a ! -L "$target/$file" ]; then
+			cp -Ra "$base/$file" "$target/$file"
+			continue
+		fi
+
+		# That leaves us with directories and a recursive call
+		[ -d $file ] && sync_dirs $base $file $target
+	done
+
+	cd $OLD_PWD
+}
+
+echo "Attempting to create fstab"
 
 # Mount some tmpfs
 mkdir -p /android
@@ -34,80 +60,80 @@ echo "fstab prepared"
 # Process the list of bind-mounts
 # (but don't mount them, mountall will do it)
 cat /etc/system-image/writable-paths | while read line; do
-    echo "" 
-    echo $line 
-    set -- $line
-    # Skip invalid/commented entries
-    ([ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]) && continue
-    [ "$1" = "#" ] && continue
+	echo "" 
+	echo $line 
+	set -- $line
+	# Skip invalid/commented entries
+	([ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ] || [ -z "$4" ] || [ -z "$5" ]) && continue
+	[ "$1" = "#" ] && continue
 
-    # Skip invalid mount points
-    dstpath="/$1"
-    [ ! -e "$dstpath" ] && continue
-    echo "not skipping" 
+	# Skip invalid mount points
+	dstpath="/$1"
+	[ ! -e "$dstpath" ] && continue
+	echo "not skipping" 
 
-    if [ "$3" = "temporary" ]; then
-        # Temporary entries are simple, just mount a tmpfs
-        echo "tmpfs $1 tmpfs $5 0 0" >> $FSTAB
-        echo "Was a tmpfs"
-    elif [ "$3" = "persistent" ] || [ "$3" = "synced" ]; then
-        echo "finding source path" 
-        # Figure out the source path
-        if [ "$2" = "auto" ]; then
-            srcpath="/data/system-data/$1"
-            path="/data/system-data/$1"
-        else
-            srcpath="/data/$2"
-            path="/data/$2"
-        fi
-        echo "srcpath: $srcpath" 
-        echo "path: $path" 
+	if [ "$3" = "temporary" ]; then
+		# Temporary entries are simple, just mount a tmpfs
+		echo "tmpfs $1 tmpfs $5 0 0" >> $FSTAB
+		echo "Was a tmpfs"
+	elif [ "$3" = "persistent" ] || [ "$3" = "synced" ]; then
+		echo "finding source path" 
+		# Figure out the source path
+		if [ "$2" = "auto" ]; then
+			srcpath="/data/system-data/$1"
+			path="/data/system-data/$1"
+		else
+			srcpath="/data/$2"
+			path="/data/$2"
+		fi
+		echo "srcpath: $srcpath" 
+		echo "path: $path" 
 
-        if [ ! -e "$srcpath" ]; then
-            # Process new persistent or synced paths
-            dstown=$(stat -c "%u:%g" $dstpath)
-            dstmode=$(stat -c "%a" $dstpath)
-            echo "dstown: $dstown | dstmode: $dstmode" 
-            mkdir -p ${srcpath%/*}
-            echo "Made srcpath" 
-            if [ ! -d "$dstpath" ]; then
-                # Deal with redirected files
-                if [ "$4" = "transition" ]; then
-                    echo "Copying file $dstpath to $srcpath" 
-                    cp -a $dstpath $srcpath
-                else
-                    echo "Making file" 
-                    touch $srcpath
-                    chown $dstown $srcpath
-                    chmod $dstmode $srcpath
-                fi
-            else
-                # Deal with redirected directories
-                if [ "$4" = "transition" ] || [ "$3" = "synced" ]; then
-                    echo "Copying path $dstpath to $srcpath" 
-                    cp -aR $dstpath $srcpath
-                else
-                    echo "Making path $srcpath" 
-                    mkdir -p $srcpath
-                    chown $dstown $srcpath
-                    chmod $dstmode $srcpath
-                fi
-            fi
-            echo "made destpath" 
-        elif [ "$3" = "synced" ]; then
-            # Process existing synced paths
-            sync_dirs $dstpath . $srcpath
-        fi
+		if [ ! -e "$srcpath" ]; then
+			# Process new persistent or synced paths
+			dstown=$(stat -c "%u:%g" $dstpath)
+			dstmode=$(stat -c "%a" $dstpath)
+			echo "dstown: $dstown | dstmode: $dstmode" 
+			mkdir -p ${srcpath%/*}
+			echo "Made srcpath" 
+			if [ ! -d "$dstpath" ]; then
+				# Deal with redirected files
+				if [ "$4" = "transition" ]; then
+					echo "Copying file $dstpath to $srcpath" 
+					cp -a $dstpath $srcpath
+				else
+					echo "Making file" 
+					touch $srcpath
+					chown $dstown $srcpath
+					chmod $dstmode $srcpath
+				fi
+			else
+				# Deal with redirected directories
+				if [ "$4" = "transition" ] || [ "$3" = "synced" ]; then
+					echo "Copying path $dstpath to $srcpath" 
+					cp -aR $dstpath $srcpath
+				else
+					echo "Making path $srcpath" 
+					mkdir -p $srcpath
+					chown $dstown $srcpath
+					chmod $dstmode $srcpath
+				fi
+			fi
+			echo "made destpath" 
+		elif [ "$3" = "synced" ]; then
+			# Process existing synced paths
+			sync_dirs $dstpath . $srcpath
+		fi
 
-        # Write the fstab entry
-        if [ "$5" = "none" ]; then
-            echo "$path $1 none bind 0 0" >> $FSTAB
-        else
-            echo "$path $1 none bind,$5 0 0" >> $FSTAB
-        fi
-    else
-        continue
-    fi
+		# Write the fstab entry
+		if [ "$5" = "none" ]; then
+			echo "$path $1 none bind 0 0" >> $FSTAB
+		else
+			echo "$path $1 none bind,$5 0 0" >> $FSTAB
+		fi
+	else
+		continue
+	fi
 done
 
 cat $FSTAB
