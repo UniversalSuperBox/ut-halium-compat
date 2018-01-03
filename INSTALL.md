@@ -9,8 +9,8 @@ Note that this will wipe any changes you've made to files inside of hybris-boot,
 ```
 git checkout hal/master
 git reset --hard
-git pull --rebase https://github.com/UniversalSuperBox/hybris-boot.git mount-safer2
 git pull --rebase https://github.com/UniversalSuperBox/hybris-boot.git halium-ro
+git pull --rebase https://github.com/UniversalSuperBox/hybris-boot.git mount-safer2
 ```
 
 Now, move back into your Halium root and build `hybris-boot` or `hybris-recovery`, whichever you prefer. Flash your new bootable image to your phone.
