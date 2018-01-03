@@ -1,7 +1,7 @@
 #!/bin/bash
 # Ubuntu Touch preinit - Mounts important things before running Upstart
 
-echo "Hello world"
+echo "Hello world - This is Ubuntu Touch preinit"
 
 set -x
 
@@ -34,21 +34,35 @@ sync_dirs() {
 	cd $OLD_PWD
 }
 
-echo "Attempting to create fstab"
-
-# Mount some tmpfs
-mkdir -p /android
-mount -o rw,size=4096 -t tmpfs none /android
+# Make tmpfs
+echo "Mounting tmpfs"
 mount -o rw,nosuid,noexec,relatime,mode=755 -t tmpfs tmpfs /run
-echo "Mounted tmpfs" 
+mkdir -p /android
+mount -t tmpfs tmpfs /android
+echo "Mounted /run and /android as tmpfs" 
 
-# Create some needed paths on tmpfs
-mkdir -p /android/data /android/system
+# Mount the rootfs
+echo "Mounting rootfs at /android/system"
+mkdir /android/system
+mount /data/system.img /android/system -o ro
+
+echo "Extracting android ramdisk to /android"
+OLD_CWD=$(pwd)
+cd /android
+cat /android/system/boot/android-ramdisk.img | gzip -d | cpio -i
+cd $OLD_CWD
+echo "Android ramdisk extracted to /android"
+
+echo "bind-mounting /android to lxc location"
+mount --bind /android /var/lib/lxc/android/rootfs
 
 # Halium puts the userdata partition on /data, but we need it at /android/data
+echo "Mounting /data to /android/data"
+mkdir -p /android/data
 mount --bind /data /android/data
 
 # Prepare the fstab
+echo "Attempting to create fstab"
 FSTAB="/etc/fstab"
 touch /run/image.fstab
 echo "image.fstab" 
@@ -137,10 +151,6 @@ cat /etc/system-image/writable-paths | while read line; do
 done
 
 cat $FSTAB
-
-# Mount the rootfs
-mount /data/system.img /android/system
-mount --bind /android/system /var/lib/lxc/android/rootfs
 
 echo "Done, starting init."
 exec /sbin/init

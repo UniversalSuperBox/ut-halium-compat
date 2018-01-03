@@ -21,4 +21,19 @@ Now that you have everything in place, install Ubuntu Touch using [this patched 
 
 ## Patch Ubuntu Touch
 
-From recovery, mount the Ubuntu Touch rootfs.img. Copy the files from the `root/` directory in this repository onto the image, preserving the file structure (`.halium-ro` will be at the root of the image, etc.). Unmount the image, `sync` all filesystems, then reboot. SSH should come up once the system begins booting to help you debug.
+From recovery, mount the Ubuntu Touch rootfs.img. 
+
+Copy the files from the `root/` directory in this repository onto the image, preserving the file structure (`.halium-ro` will be at the root of the image, etc.). 
+
+Delete `/etc/init/udev.override`
+
+Unmount the image, `sync` all filesystems, then reboot. SSH should come up once the system begins booting to help you debug.
+
+The device may show the Ubuntu spinner for a short time then reboot once and stay on the spinner. If that is the case, SSH in, change to the root user, and run the following commands:
+
+```
+mount / -o remount,rw
+cat /var/lib/lxc/android/rootfs/ueventd*.rc|grep ^/dev|sed -e 's/^\/dev\///'|awk '{printf "ACTION==\"add\", KERNEL==\"%s\", OWNER=\"%s\", GROUP=\"%s\", MODE=\"%s\"\n",$1,$3,$4,$2}' | sed -e 's/\r//' >/usr/lib/lxc-android-config/70-potter.rules
+```
+
+Then reboot. Enjoy!
